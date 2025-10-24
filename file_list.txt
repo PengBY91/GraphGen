@@ -1,0 +1,6 @@
+# GraphGen 批量处理文件列表
+# 每行一个文件路径，以 # 开头的行为注释
+
+example_input.txt
+example_input2.txt
+example_input3.txt
