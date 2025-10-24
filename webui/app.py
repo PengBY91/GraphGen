@@ -17,8 +17,10 @@ from webui.i18n import Translate
 from webui.i18n import gettext as _
 from webui.test_api import test_api_connection
 from webui.utils import cleanup_workspace, count_tokens, preview_file, setup_workspace
+from webui.task_manager import task_manager, TaskStatus
+from webui.task_api import get_task_api
 
-root_dir = files("webui").parent
+root_dir = str(files("webui").parent)
 sys.path.append(root_dir)
 
 
@@ -185,6 +187,122 @@ def run_graphgen(params: WebuiParams, progress=gr.Progress()):
     finally:
         # Clean up workspace
         cleanup_workspace(graph_gen.working_dir)
+
+
+# 任务管理相关函数
+def create_task_from_file(filename: str, file_path: str) -> str:
+    """从文件创建任务"""
+    return task_manager.create_task(filename, file_path)
+
+
+def start_task_processing(task_id: str, params: WebuiParams) -> bool:
+    """启动任务处理"""
+    task_api = get_task_api(root_dir)
+    result = task_api.start_task(task_id, params)
+    return result.get("success", False)
+
+
+def get_all_tasks() -> list:
+    """获取所有任务列表"""
+    task_api = get_task_api(root_dir)
+    result = task_api.get_all_tasks()
+    if result.get("success"):
+        return result.get("tasks", [])
+    return []
+
+
+def get_task_status_summary() -> dict:
+    """获取任务状态统计"""
+    task_api = get_task_api(root_dir)
+    result = task_api.get_task_status_summary()
+    if result.get("success"):
+        return result.get("summary", {})
+    return {}
+
+
+def delete_task(task_id: str) -> bool:
+    """删除任务"""
+    task_api = get_task_api(root_dir)
+    result = task_api.delete_task(task_id)
+    return result.get("success", False)
+
+
+def download_task_output(task_id: str) -> str:
+    """获取任务输出文件路径"""
+    task_api = get_task_api(root_dir)
+    result = task_api.download_task_output(task_id)
+    if result.get("success"):
+        return result.get("output_file", "")
+    return ""
+
+
+def refresh_task_list():
+    """刷新任务列表"""
+    tasks = get_all_tasks()
+    if not tasks:
+        return gr.update(value=[]), gr.update(value="暂无任务")
+    
+    # 构建任务表格数据
+    task_data = []
+    for task in tasks:
+        status_text = {
+            "pending": "未开始",
+            "processing": "处理中", 
+            "completed": "已完成",
+            "failed": "失败"
+        }.get(task["status"], task["status"])
+        
+        created_time = task.get("created_at", "")
+        if created_time:
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(created_time.replace('Z', '+00:00'))
+                created_time = dt.strftime("%Y-%m-%d %H:%M:%S")
+            except:
+                pass
+        
+        task_data.append([
+            task["filename"],
+            status_text,
+            created_time,
+            task["task_id"]
+        ])
+    
+    return gr.update(value=task_data), gr.update(value=f"共 {len(tasks)} 个任务")
+
+
+def get_task_details(task_id: str) -> str:
+    """获取任务详细信息"""
+    task_api = get_task_api(root_dir)
+    result = task_api.get_task(task_id)
+    if result.get("success"):
+        task = result.get("task", {})
+        
+        details = f"""
+**任务ID:** {task.get('task_id', '')}
+**文件名:** {task.get('filename', '')}
+**状态:** {task.get('status', '')}
+**创建时间:** {task.get('created_at', '')}
+"""
+        
+        if task.get('started_at'):
+            details += f"**开始时间:** {task.get('started_at', '')}\n"
+        
+        if task.get('completed_at'):
+            details += f"**完成时间:** {task.get('completed_at', '')}\n"
+        
+        if task.get('processing_time'):
+            details += f"**处理时间:** {task.get('processing_time', 0):.2f} 秒\n"
+        
+        if task.get('token_usage'):
+            token_usage = task.get('token_usage', {})
+            details += f"**Token使用量:** {token_usage.get('total_tokens', 0)}\n"
+        
+        if task.get('error_message'):
+            details += f"**错误信息:** {task.get('error_message', '')}\n"
+        
+        return details
+    return "任务不存在"
 
 
 with gr.Blocks(title="GraphGen Demo", theme=gr.themes.Glass(), css=css) as demo:
@@ -474,6 +592,44 @@ with gr.Blocks(title="GraphGen Demo", theme=gr.themes.Glass(), css=css) as demo:
                 )
 
         submit_btn = gr.Button(_("Run GraphGen"))
+        
+        # 任务管理界面
+        with gr.Tab("任务管理"):
+            with gr.Row():
+                with gr.Column(scale=2):
+                    # 任务列表
+                    task_list = gr.DataFrame(
+                        label="任务列表",
+                        headers=["文件名", "状态", "创建时间", "任务ID"],
+                        datatype=["str", "str", "str", "str"],
+                        interactive=False,
+                        wrap=True,
+                        visible=True
+                    )
+                    
+                    with gr.Row():
+                        refresh_btn = gr.Button("刷新列表", variant="secondary")
+                        delete_btn = gr.Button("删除任务", variant="stop")
+                    
+                    task_summary = gr.Textbox(
+                        label="任务统计",
+                        value="暂无任务",
+                        interactive=False
+                    )
+                
+                with gr.Column(scale=1):
+                    # 任务详情
+                    task_details = gr.Markdown(
+                        label="任务详情",
+                        value="请选择一个任务查看详情"
+                    )
+                    
+                    with gr.Row():
+                        start_task_btn = gr.Button("启动任务", variant="primary")
+                        download_btn = gr.Button("下载结果", variant="secondary")
+                    
+                    # 隐藏的任务ID存储
+                    selected_task_id = gr.Textbox(visible=False)
 
         # Test Connection
         test_connection_btn.click(
@@ -521,42 +677,55 @@ with gr.Blocks(title="GraphGen Demo", theme=gr.themes.Glass(), css=css) as demo:
         )
 
         # run GraphGen
-        submit_btn.click(
-            lambda x: (gr.update(visible=False)),
-            inputs=[token_counter],
-            outputs=[token_counter],
-        )
+        # 修改提交按钮逻辑 - 创建任务而不是直接处理
+        def create_and_start_task(*args):
+            """创建任务并启动处理"""
+            if not args[1]:  # upload_file
+                return gr.update(value="请先上传文件"), gr.update(value="请先上传文件")
+            
+            # 创建任务
+            filename = os.path.basename(args[1])
+            task_id = create_task_from_file(filename, args[1])
+            
+            # 构建参数
+            params = WebuiParams(
+                if_trainee_model=args[0],
+                input_file=args[1],
+                tokenizer=args[2],
+                output_data_type=args[3],
+                output_data_format=args[4],
+                bidirectional=args[5],
+                expand_method=args[6],
+                max_extra_edges=args[7],
+                max_tokens=args[8],
+                max_depth=args[9],
+                edge_sampling=args[10],
+                isolated_node_strategy=args[11],
+                loss_strategy=args[12],
+                synthesizer_url=args[13],
+                synthesizer_model=args[14],
+                trainee_model=args[15],
+                api_key=args[16],
+                chunk_size=args[17],
+                chunk_overlap=args[18],
+                rpm=args[19],
+                tpm=args[20],
+                quiz_samples=args[21],
+                trainee_url=args[22],
+                trainee_api_key=args[23],
+                token_counter=args[24],
+            )
+            
+            # 启动任务处理
+            success = start_task_processing(task_id, params)
+            
+            if success:
+                return gr.update(value=f"任务已创建并启动，任务ID: {task_id}"), gr.update(value=f"任务已创建并启动，任务ID: {task_id}")
+            else:
+                return gr.update(value="任务创建失败"), gr.update(value="任务创建失败")
 
         submit_btn.click(
-            lambda *args: run_graphgen(
-                WebuiParams(
-                    if_trainee_model=args[0],
-                    input_file=args[1],
-                    tokenizer=args[2],
-                    output_data_type=args[3],
-                    output_data_format=args[4],
-                    bidirectional=args[5],
-                    expand_method=args[6],
-                    max_extra_edges=args[7],
-                    max_tokens=args[8],
-                    max_depth=args[9],
-                    edge_sampling=args[10],
-                    isolated_node_strategy=args[11],
-                    loss_strategy=args[12],
-                    synthesizer_url=args[13],
-                    synthesizer_model=args[14],
-                    trainee_model=args[15],
-                    api_key=args[16],
-                    chunk_size=args[17],
-                    chunk_overlap=args[18],
-                    rpm=args[19],
-                    tpm=args[20],
-                    quiz_samples=args[21],
-                    trainee_url=args[22],
-                    trainee_api_key=args[23],
-                    token_counter=args[24],
-                )
-            ),
+            create_and_start_task,
             inputs=[
                 if_trainee_model,
                 upload_file,
@@ -585,6 +754,145 @@ with gr.Blocks(title="GraphGen Demo", theme=gr.themes.Glass(), css=css) as demo:
                 token_counter,
             ],
             outputs=[output, token_counter],
+        )
+        
+        # 任务管理界面事件处理
+        def on_task_select(evt: gr.SelectData):
+            """任务选择事件"""
+            if evt.index[0] >= 0:
+                # 获取选中的任务ID
+                task_data = refresh_task_list()[0].value
+                if task_data and evt.index[0] < len(task_data):
+                    task_id = task_data[evt.index[0]][3]  # 任务ID在第四列
+                    details = get_task_details(task_id)
+                    return gr.update(value=task_id), gr.update(value=details)
+            return gr.update(), gr.update()
+        
+        def start_selected_task(task_id: str, *args):
+            """启动选中的任务"""
+            if not task_id:
+                return gr.update(value="请先选择一个任务")
+            
+            # 构建参数
+            params = WebuiParams(
+                if_trainee_model=args[0],
+                input_file="",  # 从任务中获取
+                tokenizer=args[1],
+                output_data_type=args[2],
+                output_data_format=args[3],
+                bidirectional=args[4],
+                expand_method=args[5],
+                max_extra_edges=args[6],
+                max_tokens=args[7],
+                max_depth=args[8],
+                edge_sampling=args[9],
+                isolated_node_strategy=args[10],
+                loss_strategy=args[11],
+                synthesizer_url=args[12],
+                synthesizer_model=args[13],
+                trainee_model=args[14],
+                api_key=args[15],
+                chunk_size=args[16],
+                chunk_overlap=args[17],
+                rpm=args[18],
+                tpm=args[19],
+                quiz_samples=args[20],
+                trainee_url=args[21],
+                trainee_api_key=args[22],
+                token_counter=args[23],
+            )
+            
+            # 获取任务信息并设置文件路径
+            task_api = get_task_api(root_dir)
+            task_result = task_api.get_task(task_id)
+            if task_result.get("success"):
+                task = task_result.get("task", {})
+                params.input_file = task.get("file_path", "")
+            
+            success = start_task_processing(task_id, params)
+            if success:
+                return gr.update(value="任务已启动")
+            else:
+                return gr.update(value="任务启动失败")
+        
+        def download_selected_task(task_id: str):
+            """下载选中任务的结果"""
+            if not task_id:
+                return gr.update(value="请先选择一个任务")
+            
+            output_file = download_task_output(task_id)
+            if output_file and os.path.exists(output_file):
+                return gr.update(value=output_file)
+            else:
+                return gr.update(value="输出文件不存在")
+        
+        def delete_selected_task(task_id: str):
+            """删除选中的任务"""
+            if not task_id:
+                return gr.update(value="请先选择一个任务")
+            
+            success = delete_task(task_id)
+            if success:
+                return gr.update(value="任务已删除")
+            else:
+                return gr.update(value="任务删除失败")
+        
+        # 绑定事件
+        task_list.select(
+            on_task_select,
+            outputs=[selected_task_id, task_details]
+        )
+        
+        refresh_btn.click(
+            refresh_task_list,
+            outputs=[task_list, task_summary]
+        )
+        
+        start_task_btn.click(
+            start_selected_task,
+            inputs=[
+                selected_task_id,
+                if_trainee_model,
+                tokenizer,
+                output_data_type,
+                output_data_format,
+                bidirectional,
+                expand_method,
+                max_extra_edges,
+                max_tokens,
+                max_depth,
+                edge_sampling,
+                isolated_node_strategy,
+                loss_strategy,
+                synthesizer_url,
+                synthesizer_model,
+                trainee_model,
+                api_key,
+                chunk_size,
+                chunk_overlap,
+                rpm,
+                tpm,
+                quiz_samples,
+                trainee_url,
+                trainee_api_key,
+                token_counter,
+            ],
+            outputs=[task_details]
+        )
+        
+        download_btn.click(
+            download_selected_task,
+            inputs=[selected_task_id],
+            outputs=[output]
+        )
+        
+        delete_btn.click(
+            delete_selected_task,
+            inputs=[selected_task_id],
+            outputs=[task_details]
+        ).then(
+            refresh_task_list,
+            outputs=[task_list, task_summary]
         )
 
 
