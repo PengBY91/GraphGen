@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 import json
 
 from graphgen.graphgen import GraphGen
-from graphgen.models import OpenAIModel, Tokenizer
+from graphgen.models import OpenAIClient, Tokenizer
 from graphgen.models.llm.limitter import RPM, TPM
 from graphgen.utils import set_logger
 from webui.utils import cleanup_workspace, setup_workspace
@@ -64,39 +64,44 @@ class TaskProcessor:
             graph_gen.clear()
             
             # 设置 LLM 客户端
-            graph_gen.synthesizer_llm_client = OpenAIModel(
+            tokenizer_instance = Tokenizer(config.get("tokenizer", "cl100k_base"))
+            synthesizer_llm_client = OpenAIClient(
                 model_name=env.get("SYNTHESIZER_MODEL", ""),
                 base_url=env.get("SYNTHESIZER_BASE_URL", ""),
                 api_key=env.get("SYNTHESIZER_API_KEY", ""),
                 request_limit=True,
                 rpm=RPM(env.get("RPM", 1000)),
                 tpm=TPM(env.get("TPM", 50000)),
+                tokenizer=tokenizer_instance,
             )
             
-            graph_gen.trainee_llm_client = OpenAIModel(
+            trainee_llm_client = OpenAIClient(
                 model_name=env.get("TRAINEE_MODEL", ""),
                 base_url=env.get("TRAINEE_BASE_URL", ""),
                 api_key=env.get("TRAINEE_API_KEY", ""),
                 request_limit=True,
                 rpm=RPM(env.get("RPM", 1000)),
                 tpm=TPM(env.get("TPM", 50000)),
+                tokenizer=tokenizer_instance,
             )
             
-            graph_gen.tokenizer_instance = Tokenizer(config.get("tokenizer", "cl100k_base"))
+            graph_gen = GraphGen(
+                working_dir=working_dir,
+                tokenizer_instance=tokenizer_instance,
+                synthesizer_llm_client=synthesizer_llm_client,
+                trainee_llm_client=trainee_llm_client,
+            )
             
             # 处理数据
-            graph_gen.insert()
+            graph_gen.insert(read_config=config["read"], split_config=config["split"])
             
             if config["if_trainee_model"]:
-                # 生成测验
-                graph_gen.quiz()
-                # 判断语句
-                graph_gen.judge()
-            else:
-                graph_gen.traverse_strategy.edge_sampling = "random"
+                graph_gen.quiz_and_judge(quiz_and_judge_config=config["quiz_and_judge"])
             
-            # 遍历图
-            graph_gen.traverse()
+            graph_gen.generate(
+                partition_config=config["partition"],
+                generate_config=config["generate"],
+            )
             
             # 保存输出
             output_data = graph_gen.qa_storage.data
@@ -149,38 +154,56 @@ class TaskProcessor:
     
     def _build_config(self, params: WebuiParams) -> Dict[str, Any]:
         """构建配置字典"""
+        # 根据分区方法构建参数
+        method = params.partition_method
+        if method == "dfs":
+            partition_params = {
+                "max_units_per_community": params.dfs_max_units,
+            }
+        elif method == "bfs":
+            partition_params = {
+                "max_units_per_community": params.bfs_max_units,
+            }
+        elif method == "leiden":
+            partition_params = {
+                "max_size": params.leiden_max_size,
+                "use_lcc": params.leiden_use_lcc,
+                "random_seed": params.leiden_random_seed,
+            }
+        else:  # ece
+            partition_params = {
+                "max_units_per_community": params.ece_max_units,
+                "min_units_per_community": params.ece_min_units,
+                "max_tokens_per_community": params.ece_max_tokens,
+                "unit_sampling": params.ece_unit_sampling,
+            }
+        
         return {
             "if_trainee_model": params.if_trainee_model,
-            "read": {
-                "input_file": params.input_file,
-            },
+            "read": {"input_file": params.upload_file},
             "split": {
                 "chunk_size": params.chunk_size,
                 "chunk_overlap": params.chunk_overlap,
             },
-            "output_data_type": params.output_data_type,
-            "output_data_format": params.output_data_format,
-            "tokenizer": params.tokenizer,
             "search": {"enabled": False},
-            "quiz_and_judge_strategy": {
+            "quiz_and_judge": {
                 "enabled": params.if_trainee_model,
                 "quiz_samples": params.quiz_samples,
             },
-            "traverse_strategy": {
-                "bidirectional": params.bidirectional,
-                "expand_method": params.expand_method,
-                "max_extra_edges": params.max_extra_edges,
-                "max_tokens": params.max_tokens,
-                "max_depth": params.max_depth,
-                "edge_sampling": params.edge_sampling,
-                "isolated_node_strategy": params.isolated_node_strategy,
-                "loss_strategy": params.loss_strategy,
+            "partition": {
+                "method": params.partition_method,
+                "method_params": partition_params,
+            },
+            "generate": {
+                "mode": params.mode,
+                "data_format": params.data_format,
             },
         }
     
     def _build_env(self, params: WebuiParams) -> Dict[str, Any]:
         """构建环境变量字典"""
         return {
+            "TOKENIZER_MODEL": params.tokenizer,
             "SYNTHESIZER_BASE_URL": params.synthesizer_url,
             "SYNTHESIZER_MODEL": params.synthesizer_model,
             "TRAINEE_BASE_URL": params.trainee_url,

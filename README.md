@@ -9,17 +9,19 @@
 [![open issues](https://img.shields.io/github/issues-raw/open-sciencelab/GraphGen)](https://github.com/open-sciencelab/GraphGen/issues)
 [![issue resolution](https://img.shields.io/github/issues-closed-raw/open-sciencelab/GraphGen)](https://github.com/open-sciencelab/GraphGen/issues)
 [![documentation](https://img.shields.io/badge/docs-latest-blue)](https://chenzihong.gitbook.io/graphgen-cookbook/)
+[![pypi](https://img.shields.io/pypi/v/graphg.svg?style=flat&logo=pypi&logoColor=white)](https://pypi.org/project/graphg/)
 [![wechat](https://img.shields.io/badge/wechat-brightgreen?logo=wechat&logoColor=white)](https://cdn.vansin.top/internlm/dou.jpg)
 [![arXiv](https://img.shields.io/badge/Paper-arXiv-white)](https://arxiv.org/abs/2505.20416)
 [![Hugging Face](https://img.shields.io/badge/Paper-on%20HF-white?logo=huggingface&logoColor=yellow)](https://huggingface.co/papers/2505.20416)
 
 [![Hugging Face](https://img.shields.io/badge/Demo-on%20HF-blue?logo=huggingface&logoColor=yellow)](https://huggingface.co/spaces/chenzihong/GraphGen)
+[![Model Scope](https://img.shields.io/badge/%F0%9F%A4%96%20Demo-on%20MS-green)](https://modelscope.cn/studios/chenzihong/GraphGen)
 [![OpenXLab](https://img.shields.io/badge/Demo-on%20OpenXLab-blue?logo=openxlab&logoColor=yellow)](https://g-app-center-120612-6433-jpdvmvp.openxlab.space)
 
 
 GraphGen: Enhancing Supervised Fine-Tuning for LLMs with Knowledge-Driven Synthetic Data Generation
 
-[English](README.md) | [中文](README_ZH.md)
+[English](README.md) | [中文](README_zh)
 
 <details close>
 <summary><b>📚 Table of Contents</b></summary>
@@ -60,9 +62,19 @@ After data generation, you can use [LLaMA-Factory](https://github.com/hiyouga/LL
 
 ## 📌 Latest Updates
 
+- **2025.10.23**: We support VQA(Visual Question Answering) data generation now. Run script: `bash scripts/generate/generate_vqa.sh`.
+- **2025.10.21**: We support PDF as input format for data generation now via [MinerU](https://github.com/opendatalab/MinerU).
+- **2025.09.29**: We auto-update gradio demo on [Hugging Face](https://huggingface.co/spaces/chenzihong/GraphGen) and [ModelScope](https://modelscope.cn/studios/chenzihong/GraphGen).
+
+<details>
+<summary>History</summary>
+
 - **2025.08.14**: We have added support for community detection in knowledge graphs using the Leiden algorithm, enabling the synthesis of Chain-of-Thought (CoT) data.
 - **2025.07.31**: We have added Google, Bing, Wikipedia, and UniProt as search back-ends.
 - **2025.04.21**: We have released the initial version of GraphGen.
+
+</details>
+
 
 ## 🚀 Quick Start
 
@@ -102,6 +114,12 @@ For any questions, please check [FAQ](https://github.com/open-sciencelab/GraphGe
    ```bash
    python -m webui.app
    ```
+   
+   For hot-reload during development, run
+   ```bash
+   PYTHONPATH=. gradio webui/app.py
+   ```
+
 
 ![ui](https://github.com/user-attachments/assets/3024e9bc-5d45-45f8-a4e6-b57bd2350d84)
 
